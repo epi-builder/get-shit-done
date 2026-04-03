@@ -22,9 +22,10 @@ const WORKSTREAM_SESSION_ENV_KEYS = [
   'WT_SESSION',
   'TMUX_PANE',
   'ZELLIJ_SESSION_NAME',
-  'TTY',
-  'SSH_TTY',
 ];
+
+let cachedControllingTtyToken = null;
+let didProbeControllingTtyToken = false;
 
 // ─── Path helpers ────────────────────────────────────────────────────────────
 
@@ -637,10 +638,14 @@ function sanitizeWorkstreamSessionToken(value) {
   return token ? token.slice(0, 160) : null;
 }
 
-function getControllingTtyToken() {
-  for (const envKey of ['TTY', 'SSH_TTY']) {
-    const token = sanitizeWorkstreamSessionToken(process.env[envKey]);
-    if (token) return `tty-${token.replace(/^dev_/, '')}`;
+function probeControllingTtyToken() {
+  if (didProbeControllingTtyToken) return cachedControllingTtyToken;
+  didProbeControllingTtyToken = true;
+
+  // `tty` reads stdin. When stdin is already non-interactive, spawning it only
+  // adds avoidable failures on the routing hot path and cannot reveal a stable token.
+  if (!(process.stdin && process.stdin.isTTY)) {
+    return cachedControllingTtyToken;
   }
 
   try {
@@ -650,13 +655,31 @@ function getControllingTtyToken() {
     }).trim();
     if (ttyPath && ttyPath !== 'not a tty') {
       const token = sanitizeWorkstreamSessionToken(ttyPath.replace(/^\/dev\//, ''));
-      if (token) return `tty-${token}`;
+      if (token) cachedControllingTtyToken = `tty-${token}`;
     }
   } catch {}
 
-  return null;
+  return cachedControllingTtyToken;
 }
 
+function getControllingTtyToken() {
+  for (const envKey of ['TTY', 'SSH_TTY']) {
+    const token = sanitizeWorkstreamSessionToken(process.env[envKey]);
+    if (token) return `tty-${token.replace(/^dev_/, '')}`;
+  }
+
+  return probeControllingTtyToken();
+}
+
+/**
+ * Resolve a deterministic session key for workstream-local routing.
+ *
+ * Order:
+ * 1. Explicit runtime/session env vars (`GSD_SESSION_KEY`, `CODEX_THREAD_ID`, etc.)
+ * 2. Terminal identity exposed via `TTY` or `SSH_TTY`
+ * 3. One best-effort `tty` probe when stdin is interactive
+ * 4. `null`, which tells callers to use the legacy shared pointer fallback
+ */
 function getWorkstreamSessionKey() {
   for (const envKey of WORKSTREAM_SESSION_ENV_KEYS) {
     const raw = process.env[envKey];
@@ -685,16 +708,32 @@ function getSessionScopedWorkstreamFile(cwd) {
   };
 }
 
-function readActiveWorkstreamPointer(filePath, cwd) {
+function clearActiveWorkstreamPointer(filePath, cleanupDirPath) {
+  try { fs.unlinkSync(filePath); } catch {}
+
+  // Session-scoped pointers for a repo share one tmp directory. Only remove it
+  // when it is empty so clearing or self-healing one session never deletes siblings.
+  if (cleanupDirPath) {
+    try { fs.rmdirSync(cleanupDirPath); } catch {}
+  }
+}
+
+/**
+ * Pointer files are self-healing: invalid names or deleted-workstream pointers
+ * are removed on read so the session falls back to `null` instead of carrying
+ * silent stale state forward. Session-scoped callers may also prune an empty
+ * per-project tmp directory; shared `.planning/active-workstream` callers do not.
+ */
+function readActiveWorkstreamPointer(filePath, cwd, cleanupDirPath = null) {
   try {
     const name = fs.readFileSync(filePath, 'utf-8').trim();
     if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
-      try { fs.unlinkSync(filePath); } catch {}
+      clearActiveWorkstreamPointer(filePath, cleanupDirPath);
       return null;
     }
     const wsDir = path.join(planningRoot(cwd), 'workstreams', name);
     if (!fs.existsSync(wsDir)) {
-      try { fs.unlinkSync(filePath); } catch {}
+      clearActiveWorkstreamPointer(filePath, cleanupDirPath);
       return null;
     }
     return name;
@@ -716,7 +755,7 @@ function readActiveWorkstreamPointer(filePath, cwd) {
 function getActiveWorkstream(cwd) {
   const sessionScoped = getSessionScopedWorkstreamFile(cwd);
   if (sessionScoped) {
-    return readActiveWorkstreamPointer(sessionScoped.filePath, cwd);
+    return readActiveWorkstreamPointer(sessionScoped.filePath, cwd, sessionScoped.dirPath);
   }
 
   const sharedFilePath = path.join(planningRoot(cwd), 'active-workstream');
@@ -737,10 +776,7 @@ function setActiveWorkstream(cwd, name) {
     : path.join(planningRoot(cwd), 'active-workstream');
 
   if (!name) {
-    try { fs.unlinkSync(filePath); } catch {}
-    if (sessionScoped) {
-      try { fs.rmdirSync(sessionScoped.dirPath); } catch {}
-    }
+    clearActiveWorkstreamPointer(filePath, sessionScoped ? sessionScoped.dirPath : null);
     return;
   }
   if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
