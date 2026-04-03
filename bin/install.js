@@ -504,20 +504,6 @@ function readSettings(settingsPath) {
 }
 
 /**
- * Read and parse JSONC config, returning empty object if it doesn't exist
- */
-function readJsoncSettings(settingsPath) {
-  if (fs.existsSync(settingsPath)) {
-    try {
-      return parseJsonc(fs.readFileSync(settingsPath, 'utf8'));
-    } catch (e) {
-      return {};
-    }
-  }
-  return {};
-}
-
-/**
  * Write settings.json with proper formatting
  */
 function writeSettings(settingsPath, settings) {
@@ -5997,7 +5983,6 @@ if (process.env.GSD_TEST_MODE) {
     validateHookFields,
     installSdk,
     promptSdk,
-    configureOpencodePermissions,
   };
 } else {
 
