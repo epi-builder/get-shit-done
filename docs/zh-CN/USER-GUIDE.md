@@ -214,6 +214,15 @@
 | `/gsd-autonomous [--from N] [--to N] [--only N]` | 自主执行剩余阶段（`--to N` 到阶段 N 停止） | 批量自动处理 |
 | `/gsd-analyze-dependencies` | 检测阶段间依赖关系 | `/gsd-manager` 前分析 |
 
+### 状态管理
+
+| 命令 | 用途 | 何时使用 |
+|---------|---------|-------------|
+| `state validate` | 检测 STATE.md 与文件系统之间的偏差 | STATE.md 看起来不对时 |
+| `state sync` | 从磁盘上的实际项目状态重建 STATE.md | 验证发现偏差后 |
+| `state sync --verify` | 干运行：显示提议的更改但不写入 | sync 前预览 |
+| `state planned-phase --phase N --plans N` | 记录 plan-phase 完成后的状态转换 | plan-phase 后 |
+
 ### 现有代码库和工具
 
 | 命令 | 用途 | 何时使用 |
@@ -431,6 +440,22 @@ claude --dangerously-skip-permissions
 
 不要重新运行 `/gsd-execute-phase`。使用 `/gsd-quick` 进行针对性修复，或用 `/gsd-verify-work` 通过 UAT 系统识别和修复问题。
 
+### STATE.md 不同步
+
+如果 STATE.md 显示不正确的阶段状态或位置，使用状态一致性命令：
+
+```bash
+node gsd-tools.cjs state validate          # 检测 STATE.md 与文件系统之间的偏差
+node gsd-tools.cjs state sync --verify     # 预览 sync 将更改的内容
+node gsd-tools.cjs state sync              # 从磁盘重建 STATE.md
+```
+
+这些命令是 v1.32 新增的，替代了手动编辑 STATE.md。
+
+### 研究门控（Research Gate）
+
+`/gsd-plan-phase` 在规划开始前会检查 RESEARCH.md 是否存在未解决的开放问题。如果存在未解决的问题，规划将被阻止，系统会显示需要解决的具体问题。这防止了基于不完整信息构建计划。
+
 ### 模型成本太高
 
 切换到 budget 配置：`/gsd-set-profile budget`。如果领域对你（或 Claude）熟悉，通过 `/gsd-settings` 禁用研究和计划检查代理。
@@ -458,6 +483,7 @@ claude --dangerously-skip-permissions
 | 需要更改范围 | `/gsd-add-phase`、`/gsd-insert-phase` 或 `/gsd-remove-phase` |
 | 里程碑审计发现缺口 | `/gsd-plan-milestone-gaps` |
 | 出问题了 | `/gsd-debug "描述"` |
+| STATE.md 不同步 | `state validate` 然后 `state sync` |
 | 快速针对性修复 | `/gsd-quick` |
 | 计划与你的愿景不符 | `/gsd-discuss-phase [N]` 然后重新规划 |
 | 成本过高 | `/gsd-set-profile budget` 和 `/gsd-settings` 关闭代理 |

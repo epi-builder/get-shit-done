@@ -70,6 +70,21 @@ Para detalhes completos de flags avançadas e mudanças recentes, consulte tamb�
 | `/gsd-plant-seed <ideia>` | Registra ideia com gatilho futuro |
 | `/gsd-thread [nome]` | Gerencia threads persistentes |
 
+## Gerenciamento de Estado
+
+| Comando | Finalidade |
+|---------|------------|
+| `state validate` | Detecta drift entre STATE.md e o filesystem real |
+| `state sync` | Reconstrói STATE.md a partir do estado real no disco |
+| `state sync --verify` | Dry-run: mostra mudanças propostas sem gravar |
+| `state planned-phase --phase N --plans N` | Registra transição de estado após plan-phase |
+
+```bash
+node gsd-tools.cjs state validate          # Detectar drift
+node gsd-tools.cjs state sync --verify     # Prévia do que sync mudaria
+node gsd-tools.cjs state sync              # Reconstruir STATE.md a partir do disco
+```
+
 ---
 
 ## Exemplo rápido
